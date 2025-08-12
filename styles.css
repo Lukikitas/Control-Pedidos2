@@ -16,7 +16,7 @@ body { font-family: 'Inter', sans-serif; }
 }
 /* Borde parpadeante para pedidos viejos */
 @keyframes blink-red { 50% { border-color: transparent; } }
-.blinking-border { border: 3px solid #ef4444; animation: blink-red 1.5s step-end infinite; }
+.blinking-border { border: 3px solid #ebca38; animation: blink-red 1.5s step-end infinite; }
 @keyframes blink-red-fast { 50% { border-color: transparent; } }
 .critical-border { border: 3px solid #ef4444; animation: blink-red-fast .7s step-end infinite; }
 
