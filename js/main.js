@@ -232,10 +232,6 @@ function renderViewerList(codes, isNewCode) {
     'text-[12rem] md:text-[13rem]'
   ];
 
-  const now = Date.now();
-  const alertTime = userSettings.blinkMinutes * 60 * 1000;
-  const criticalTime = userSettings.criticalMinutes * 60 * 1000;
-
   codes.forEach((c, index) => {
     let sizeClass = sizeClasses[userSettings.viewerSize - 1] || sizeClasses[2];
     const displaySource = c.source === 'RappiCargo' ? 'Rappi' : c.source;
@@ -243,12 +239,6 @@ function renderViewerList(codes, isNewCode) {
     const card = document.createElement('div');
     card.className = 'bg-white rounded-xl shadow-lg p-4 flex flex-col items-center justify-center aspect-video';
     if (index === 0 && isNewCode) card.classList.add('new-order-pop');
-    const ts = c.timestamp?.toDate ? c.timestamp.toDate().getTime() : 0;
-    const age = now - ts;
-    const isCritical = ts && age > criticalTime;
-    const isOld = ts && age > alertTime;
-    const blinkClass = isCritical ? 'critical-border' : isOld ? 'blinking-border' : '';
-    if (blinkClass) card.classList.add(blinkClass);
     card.innerHTML = `
         <p class="viewer-order font-black text-gray-900 ${sizeClass} tracking-tighter px-2">${c.code}</p>
         <div class="mt-4 px-6 py-2 rounded-lg ${style}"><p class="font-bold text-xl">${displaySource}</p></div>`;
@@ -396,6 +386,9 @@ function renderCloseOrders(filter='all') {
     wrap.className = `rounded-xl border ${st.border} ${st.light} p-3 sm:p-4`;
 
     const sorted = items.slice().sort((a,b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
+    const now = Date.now();
+    const alertTime = userSettings.blinkMinutes * 60 * 1000;
+    const criticalTime = userSettings.criticalMinutes * 60 * 1000;
 
     wrap.innerHTML = `
         <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -406,18 +399,24 @@ function renderCloseOrders(filter='all') {
         </div>
 
         <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          ${sorted.map(i => `
-            <div class="co-card bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-lg p-4 flex items-center justify-between">
+          ${sorted.map(i => {
+            const ts = (i.timestamp?.seconds || 0) * 1000;
+            const age = now - ts;
+            const isCritical = ts && age > criticalTime;
+            const isOld = ts && age > alertTime;
+            const blinkClass = isCritical ? 'critical-border' : isOld ? 'blinking-border' : '';
+            return `
+            <div class="co-card bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-lg p-4 flex items-center justify-between ${blinkClass}">
               <div class="min-w-0">
                 <p class="font-black text-2xl tracking-tight truncate">${i.code}</p>
-                <p class="text-xs text-gray-500">${i.type === 'name' ? 'Nombre' : 'Código'} • ${new Date((i.timestamp?.seconds||0)*1000).toLocaleTimeString()}</p>
+                <p class="text-xs text-gray-500">${i.type === 'name' ? 'Nombre' : 'Código'} • ${new Date(ts).toLocaleTimeString()}</p>
                 ${i.note ? `<p class="text-sm break-words mt-1">${i.note}</p>` : ''}
               </div>
               <button class="finish-item bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm co-btn" data-id="${i.id}">
                 Finalizar
               </button>
-            </div>
-          `).join('')}
+            </div>`;
+          }).join('')}
         </div>
       `;
     closeGroupsEl.appendChild(wrap);
@@ -469,6 +468,13 @@ document.querySelectorAll('.source-btn').forEach(btn => btn.addEventListener('cl
     currentSource = source;
   }
 }));
+const noteInputEl = document.getElementById('note-input');
+document.getElementById('note-bags-btn').addEventListener('click', () => {
+  if (noteInputEl) noteInputEl.value = 'Varias bolsas';
+});
+document.getElementById('note-cash-btn').addEventListener('click', () => {
+  if (noteInputEl) noteInputEl.value = 'Efectivo';
+});
 document.getElementById('submit-code-btn').addEventListener('click', () => {
   const code = document.getElementById('code-display').textContent;
   const noteInput = document.getElementById('note-input');
