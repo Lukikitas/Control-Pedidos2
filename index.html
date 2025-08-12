@@ -1,1 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sincronizador de Pedidos + Cierre pedidos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Librerías para PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-300 transition-colors">
 
+<div id="app-container" class="p-0 sm:p-4">
+
+  <!-- 1) Login/Registro -->
+  <div id="login-view">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 text-center max-w-md mx-auto mt-10">
+      <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Control de Pedidos</h1>
+      <p class="text-gray-600 dark:text-gray-300 mb-6">Inicia sesión o regístrate para continuar.</p>
+      <form id="login-form" class="space-y-4">
+        <input type="email" id="email-input" placeholder="Correo electrónico" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white" required/>
+        <input type="password" id="password-input" placeholder="Contraseña" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white" required/>
+        <div class="flex gap-2">
+          <button type="submit" id="login-btn" class="flex-1 bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition">Iniciar Sesión</button>
+          <button type="button" id="register-btn" class="flex-1 bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg hover:bg-gray-300 dark:bg-gray-600 dark:text-white dark:hover:bg-gray-500">Registrarse</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2) Menú de roles -->
+  <div id="role-selection-view" class="hidden">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 text-center max-w-2xl mx-auto">
+      <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Selecciona tu Rol</h1>
+      <p id="welcome-email" class="text-gray-600 dark:text-gray-300 mb-8"></p>
+
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
+        <button id="select-operator-btn" class="p-4 sm:p-6 bg-blue-50 dark:bg-blue-900/50 hover:bg-blue-100 dark:hover:bg-blue-900 border-2 border-blue-200 dark:border-blue-800 rounded-lg transition flex flex-col items-center justify-center">
+          <span class="text-4xl sm:text-5xl">⌨️</span>
+          <h2 class="text-lg sm:text-xl font-bold mt-2 dark:text-white">Operador</h2>
+        </button>
+
+        <button id="select-viewer-btn" class="p-4 sm:p-6 bg-green-50 dark:bg-green-900/50 hover:bg-green-100 dark:hover:bg-green-900 border-2 border-green-200 dark:border-green-800 rounded-lg transition flex flex-col items-center justify-center">
+          <span class="text-4xl sm:text-5xl">📺</span>
+          <h2 class="text-lg sm:text-xl font-bold mt-2 dark:text-white">Visualizador</h2>
+        </button>
+
+        <button id="select-history-btn" class="p-4 sm:p-6 bg-purple-50 dark:bg-purple-900/50 hover:bg-purple-100 dark:hover:bg-purple-900 border-2 border-purple-200 dark:border-purple-800 rounded-lg transition flex flex-col items-center justify-center">
+          <span class="text-4xl sm:text-5xl">📋</span>
+          <h2 class="text-lg sm:text-xl font-bold mt-2 dark:text-white">Historial</h2>
+        </button>
+
+        <button id="select-settings-btn" class="p-4 sm:p-6 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border-2 border-gray-200 dark:border-gray-500 rounded-lg transition flex flex-col items-center justify-center">
+          <span class="text-4xl sm:text-5xl">⚙️</span>
+          <h2 class="text-lg sm:text-xl font-bold mt-2 dark:text-white">Ajustes</h2>
+        </button>
+
+        <!-- Nuevo: Cierre pedidos -->
+        <button id="select-closeorders-btn" class="p-4 sm:p-6 bg-emerald-50 dark:bg-emerald-900/50 hover:bg-emerald-100 dark:hover:bg-emerald-900 border-2 border-emerald-200 dark:border-emerald-800 rounded-lg transition flex flex-col items-center justify-center">
+          <span class="text-4xl sm:text-5xl">✅</span>
+          <h2 class="text-lg sm:text-xl font-bold mt-2 dark:text-white">Cierre pedidos</h2>
+        </button>
+      </div>
+
+      <button id="role-logout-btn" class="mt-8 text-sm text-gray-500 hover:underline">Cerrar Sesión</button>
+    </div>
+  </div>
+
+  <!-- 3) Vistas principales -->
+  <div id="main-view" class="hidden">
+
+    <!-- Operador -->
+    <div id="operator-view" class="hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 sm:p-6 flex flex-col">
+          <div class="flex flex-wrap justify-between items-center mb-4 gap-y-2">
+            <h2 class="text-xl font-bold">Operador</h2>
+            <div class="flex items-center gap-2 sm:gap-4 flex-wrap">
+              <button id="op-back-to-menu-btn" class="text-sm text-gray-500 hover:underline">Menú</button>
+              <button id="switch-to-viewer-btn" class="text-sm text-blue-600 hover:underline">Visualizador</button>
+              <button id="op-logout-btn" class="text-sm text-red-600 hover:underline">Salir</button>
+            </div>
+          </div>
+
+          <div id="code-display" class="w-full text-center text-5xl font-mono tracking-widest px-4 py-3 bg-gray-100 dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 rounded-lg mb-4 h-20 flex items-center justify-center"></div>
+
+          <div class="grid grid-cols-3 gap-2 mb-4">
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">1</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">2</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">3</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">4</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">5</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">6</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">7</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">8</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">9</button>
+            <button id="clear-btn" class="text-xl font-bold py-4 bg-red-200 dark:bg-red-800/50 rounded-lg hover:bg-red-300 dark:hover:bg-red-700/50">C</button>
+            <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">0</button>
+            <button id="backspace-btn" class="text-2xl font-bold py-4 bg-yellow-200 dark:bg-yellow-800/50 rounded-lg hover:bg-yellow-300 dark:hover:bg-yellow-700/50">⌫</button>
+          </div>
+
+          <div class="grid grid-cols-4 gap-2 mb-4">
+            <button class="source-btn flex items-center justify-center p-3 rounded-lg bg-red-600 text-white font-semibold" data-source="PedidosYa">PedidosYa</button>
+            <button class="source-btn flex items-center justify-center p-3 rounded-lg bg-sky-500 text-white font-semibold" data-source="Rappi">Rappi</button>
+            <button class="source-btn flex items-center justify-center p-3 rounded-lg bg-yellow-400 text-black font-semibold" data-source="MercadoPago">M. Pago</button>
+            <button class="source-btn flex items-center justify-center p-3 rounded-lg bg-orange-500 text-white font-semibold" data-source="RappiCargo">RappiCargo</button>
+          </div>
+
+          <button id="submit-code-btn" class="w-full bg-green-600 text-white font-bold py-4 rounded-lg hover:bg-green-700 mb-3">Guardar Pedido</button>
+          <!-- Botón calculadora: debajo del Guardar -->
+          <button id="open-calculator-btn" class="w-full bg-blue-600 text-white rounded-lg p-4 text-lg font-semibold hover:bg-blue-700 transition">Abrir calculadora 📟</button>
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
+          <h2 class="text-xl font-bold mb-4">Pedidos Activos</h2>
+          <div id="operator-code-list" class="space-y-2 h-[600px] overflow-y-auto pr-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Visualizador -->
+    <div id="viewer-view" class="hidden flex flex-col h-screen relative">
+      <div class="absolute inset-0 flex items-center justify-center z-0 pointer-events-none">
+        <img src="https://1000marcas.net/wp-content/uploads/2020/01/KFC-logo-600x338.png" class="w-1/2 h-1/2 object-contain opacity-10" alt="Marca de agua de KFC"/>
+      </div>
+      <div class="flex justify-between items-center mb-2 px-2 flex-shrink-0 relative z-10">
+        <h1 class="text-2xl font-black text-gray-700">VISUALIZADOR DE PEDIDOS</h1>
+        <div class="flex items-center gap-4">
+          <button id="viewer-back-to-menu-btn" class="text-sm text-gray-500 hover:underline">Menú</button>
+          <button id="switch-to-operator-btn" class="text-sm text-blue-600 hover:underline">Ver Operador</button>
+          <button id="viewer-logout-btn" class="text-sm text-red-600 hover:underline">Cerrar Sesión</button>
+        </div>
+      </div>
+      <div id="viewer-code-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 flex-grow overflow-y-auto p-2 relative z-10"></div>
+      <div id="viewer-footer-text" class="text-center font-bold flex-shrink-0 bg-gray-100 dark:bg-gray-900 relative z-10"></div>
+    </div>
+
+    <!-- Cierre pedidos -->
+    <div id="closeorders-view" class="hidden">
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 sm:p-6">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <h2 class="text-xl font-black">Cierre de pedidos</h2>
+          <div class="flex items-center gap-2">
+            <button id="closeorders-back-to-menu-btn" class="text-sm text-gray-500 hover:underline">Menú</button>
+            <button id="closeorders-logout-btn" class="text-sm text-red-600 hover:underline">Salir</button>
+          </div>
+        </div>
+
+        <!-- Filtros táctiles -->
+        <div class="mt-3 grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
+          <button class="co-filter tab-active px-3 py-2 rounded-lg text-sm font-semibold border" data-filter="all">Todos</button>
+          <button class="co-filter px-3 py-2 rounded-lg text-sm font-semibold border border-red-300 text-red-700 bg-red-50 dark:bg-red-900/20" data-filter="PedidosYa">PedidosYa</button>
+          <button class="co-filter px-3 py-2 rounded-lg text-sm font-semibold border border-orange-300 text-orange-700 bg-orange-50 dark:bg-orange-900/20" data-filter="Rappi">Rappi</button>
+          <button class="co-filter px-3 py-2 rounded-lg text-sm font-semibold border border-sky-300 text-sky-700 bg-sky-50 dark:bg-sky-900/20" data-filter="RappiCargo">RappiCargo</button>
+          <button class="co-filter px-3 py-2 rounded-lg text-sm font-semibold border border-green-300 text-green-700 bg-green-50 dark:bg-green-900/20" data-filter="MercadoPago">MercadoPago</button>
+        </div>
+
+        <!-- Grupos por tipo (sin “Finalizar todos”) -->
+        <div id="closeorders-groups" class="mt-4 space-y-4"></div>
+      </div>
+    </div>
+
+    <!-- Historial -->
+    <div id="history-view" class="hidden">
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
+        <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
+          <div class="flex items-center gap-2">
+            <input type="text" id="history-search-input" placeholder="Buscar por código..." class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">
+            <select id="history-filter-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">
+              <option value="all">Todos</option>
+              <option value="PedidosYa">PedidosYa</option>
+              <option value="Rappi">Rappi</option>
+              <option value="RappiCargo">RappiCargo</option>
+              <option value="MercadoPago">MercadoPago</option>
+            </select>
+          </div>
+          <div class="flex gap-2">
+            <button id="history-back-to-menu-btn" class="bg-gray-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Menú</button>
+            <button id="export-pdf-btn" class="bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg text-sm">PDF</button>
+            <button id="delete-history-btn" class="bg-red-600 text-white font-semibold px-4 py-2 rounded-lg text-sm">Borrar</button>
+            <button id="history-logout-btn" class="text-sm text-gray-500 hover:underline">Salir</button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table id="history-table" class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
+              <tr>
+                <th scope="col" class="px-6 py-3">Código/Nombre</th>
+                <th scope="col" class="px-6 py-3">Tipo</th>
+                <th scope="col" class="px-6 py-3">Creado</th>
+                <th scope="col" class="px-6 py-3">Completado</th>
+                <th scope="col" class="px-6 py-3">Duración</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ajustes -->
+    <div id="settings-view" class="hidden">
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 max-w-lg mx-auto">
+        <h2 class="text-2xl font-bold mb-6 text-center">Configuración</h2>
+        <div class="space-y-6">
+          <div>
+            <label for="blink-minutes-input" class="block mb-2 text-sm font-medium">Tiempo de alerta para parpadeo (minutos)</label>
+            <input type="number" id="blink-minutes-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">
+          </div>
+          <div>
+            <label for="scroll-speed-input" class="block mb-2 text-sm font-medium">Velocidad de scroll (1: Lento, 5: Rápido)</label>
+            <input type="range" id="scroll-speed-input" min="1" max="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
+          </div>
+          <div>
+            <label for="viewer-size-input" class="block mb-2 text-sm font-medium">Tamaño en visualizador (1: Pequeño, 5: Muy Grande)</label>
+            <input type="range" id="viewer-size-input" min="1" max="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
+          </div>
+          <div>
+            <label for="calculator-size-input" class="block mb-2 text-sm font-medium">Tamaño de la calculadora (1: Pequeña, 5: Muy Grande)</label>
+            <input type="range" id="calculator-size-input" min="1" max="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
+          </div>
+          <div>
+            <label for="viewer-text-input" class="block mb-2 text-sm font-medium">Frase en el pie del visualizador</label>
+            <input type="text" id="viewer-text-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">
+          </div>
+          <div>
+            <label for="viewer-footer-size-input" class="block mb-2 text-sm font-medium">Tamaño del texto inferior (1: Pequeño, 3: Grande)</label>
+            <input type="range" id="viewer-footer-size-input" min="1" max="3" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
+          </div>
+        </div>
+        <div class="flex justify-end gap-4 mt-8">
+          <button id="settings-back-to-menu-btn" class="text-sm text-gray-500 hover:underline">Volver al Menú</button>
+          <button id="save-settings-btn" class="bg-green-600 text-white font-semibold px-6 py-2 rounded-lg">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notificaciones -->
+  <div id="notification-modal" class="hidden fixed top-5 right-5 bg-white border rounded-lg shadow-lg px-6 py-4 z-50 transition-transform duration-300 translate-x-full dark:bg-gray-700 dark:border-gray-600">
+    <p id="notification-message"></p>
+  </div>
+
+  <!-- Calculadora -->
+  <div id="calculator-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-40 flex items-center justify-center p-4">
+    <div id="calculator-modal" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-2xl transition-transform transform">
+      <div id="calc-expression-display" class="text-right text-gray-500 dark:text-gray-400 text-sm h-6 mb-1 truncate"></div>
+      <div id="calc-display" class="bg-gray-100 dark:bg-gray-900 text-right rounded p-2 mb-2 text-2xl font-mono">0</div>
+      <div id="calc-buttons" class="grid grid-cols-4 gap-2">
+        <button class="calc-btn bg-red-500 text-white rounded p-2 text-lg">C</button>
+        <button class="calc-btn bg-gray-200 dark:bg-gray-600 rounded p-2 text-lg">/</button>
+        <button class="calc-btn bg-gray-200 dark:bg-gray-600 rounded p-2 text-lg">*</button>
+        <button class="calc-btn bg-gray-200 dark:bg-gray-600 rounded p-2 text-lg">-</button>
+
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">7</button>
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">8</button>
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">9</button>
+        <button class="calc-btn bg-gray-200 dark:bg-gray-600 row-span-2 rounded p-2 text-lg">+</button>
+
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">4</button>
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">5</button>
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">6</button>
+
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">1</button>
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">2</button>
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">3</button>
+        <button class="calc-btn bg-blue-500 text-white row-span-2 rounded p-2 text-lg">=</button>
+
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 col-span-2 rounded p-2 text-lg">0</button>
+        <button class="calc-btn bg-gray-100 dark:bg-gray-700 rounded p-2 text-lg">.</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal RappiCargo (nombre) -->
+  <div id="rappicargo-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-40 flex items-center justify-center p-4">
+    <div id="rappicargo-modal" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-2xl w-full max-w-sm">
+      <h3 class="text-lg font-bold mb-4">Ingresar Nombre para RappiCargo</h3>
+      <input type="text" id="rappicargo-name-input" placeholder="Nombre del cliente..." class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+      <div class="flex justify-end gap-2 mt-4">
+        <button id="cancel-rappicargo-btn" class="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 dark:bg-gray-600 dark:text-white">Cancelar</button>
+        <button id="save-rappicargo-btn" class="bg-orange-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-orange-600">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
