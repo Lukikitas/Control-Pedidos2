@@ -3,6 +3,8 @@ import { showNotification, fitTextToContainer } from './utils.js';
 import { userSettings, updateLocalSettings, populateSettingsForm, registerSettingsHandlers } from './settings.js';
 import { initCalculator } from './calculator.js';
 import { initRappicargo } from './rappicargo.js';
+import { registerAuthHandlers, handleLogout } from './auth.js';
+import { registerNavigationEvents } from './navigation.js';
 
 const { jsPDF } = window.jspdf;
 
