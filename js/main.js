@@ -1,7 +1,8 @@
 import { auth, db, doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, onAuthStateChanged } from './firebase.js';
 import { showNotification, fitTextToContainer } from './utils.js';
-import { registerAuthHandlers, handleLogout } from './auth.js';
-import { registerNavigationEvents } from './navigation.js';
+import { userSettings, updateLocalSettings, populateSettingsForm, registerSettingsHandlers } from './settings.js';
+import { initCalculator } from './calculator.js';
+import { initRappicargo } from './rappicargo.js';
 
 const { jsPDF } = window.jspdf;
 
@@ -12,15 +13,6 @@ let scrollInterval = null;
 let scrollPauseTimeout = null;
 let oldOrdersInterval = null;
 let previousCodesCount = 0;
-let userSettings = {
-  blinkMinutes: 5,
-  criticalMinutes: 15,
-  scrollSpeed: 3,
-  viewerSize: 3,
-  calculatorSize: 4,
-  viewerFooterText: "⬅️ para retirar",
-  viewerFooterSize: 3,
-};
 
 const loginView = document.getElementById('login-view');
 const roleSelectionView = document.getElementById('role-selection-view');
@@ -102,7 +94,7 @@ function listenForCodes(userId) {
       sessionData = docSnap.data();
       sessionData.codes = sessionData.codes || [];
       sessionData.history = sessionData.history || [];
-      userSettings = { ...userSettings, ...sessionData.settings };
+      updateLocalSettings(sessionData.settings);
 
       const isNewCode = sessionData.codes.length > previousCodesCount;
       previousCodesCount = sessionData.codes.length;
@@ -240,10 +232,6 @@ function renderViewerList(codes, isNewCode) {
     'text-[12rem] md:text-[13rem]'
   ];
 
-  const now = Date.now();
-  const alertTime = userSettings.blinkMinutes * 60 * 1000;
-  const criticalTime = userSettings.criticalMinutes * 60 * 1000;
-
   codes.forEach((c, index) => {
     let sizeClass = sizeClasses[userSettings.viewerSize - 1] || sizeClasses[2];
     const displaySource = c.source === 'RappiCargo' ? 'Rappi' : c.source;
@@ -251,12 +239,6 @@ function renderViewerList(codes, isNewCode) {
     const card = document.createElement('div');
     card.className = 'bg-white rounded-xl shadow-lg p-4 flex flex-col items-center justify-center aspect-video';
     if (index === 0 && isNewCode) card.classList.add('new-order-pop');
-    const ts = c.timestamp?.toDate ? c.timestamp.toDate().getTime() : 0;
-    const age = now - ts;
-    const isCritical = ts && age > criticalTime;
-    const isOld = ts && age > alertTime;
-    const blinkClass = isCritical ? 'critical-border' : isOld ? 'blinking-border' : '';
-    if (blinkClass) card.classList.add(blinkClass);
     card.innerHTML = `
         <p class="viewer-order font-black text-gray-900 ${sizeClass} tracking-tighter px-2">${c.code}</p>
         <div class="mt-4 px-6 py-2 rounded-lg ${style}"><p class="font-bold text-xl">${displaySource}</p></div>`;
@@ -404,6 +386,9 @@ function renderCloseOrders(filter='all') {
     wrap.className = `rounded-xl border ${st.border} ${st.light} p-3 sm:p-4`;
 
     const sorted = items.slice().sort((a,b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
+    const now = Date.now();
+    const alertTime = userSettings.blinkMinutes * 60 * 1000;
+    const criticalTime = userSettings.criticalMinutes * 60 * 1000;
 
     wrap.innerHTML = `
         <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -414,18 +399,24 @@ function renderCloseOrders(filter='all') {
         </div>
 
         <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          ${sorted.map(i => `
-            <div class="co-card bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-lg p-4 flex items-center justify-between">
+          ${sorted.map(i => {
+            const ts = (i.timestamp?.seconds || 0) * 1000;
+            const age = now - ts;
+            const isCritical = ts && age > criticalTime;
+            const isOld = ts && age > alertTime;
+            const blinkClass = isCritical ? 'critical-border' : isOld ? 'blinking-border' : '';
+            return `
+            <div class="co-card bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-lg p-4 flex items-center justify-between ${blinkClass}">
               <div class="min-w-0">
                 <p class="font-black text-2xl tracking-tight truncate">${i.code}</p>
-                <p class="text-xs text-gray-500">${i.type === 'name' ? 'Nombre' : 'Código'} • ${new Date((i.timestamp?.seconds||0)*1000).toLocaleTimeString()}</p>
+                <p class="text-xs text-gray-500">${i.type === 'name' ? 'Nombre' : 'Código'} • ${new Date(ts).toLocaleTimeString()}</p>
                 ${i.note ? `<p class="text-sm break-words mt-1">${i.note}</p>` : ''}
               </div>
               <button class="finish-item bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm co-btn" data-id="${i.id}">
                 Finalizar
               </button>
-            </div>
-          `).join('')}
+            </div>`;
+          }).join('')}
         </div>
       `;
     closeGroupsEl.appendChild(wrap);
@@ -456,11 +447,6 @@ if (closeGroupsEl) {
 }
 
 function backToMenu() { localStorage.removeItem('userRole'); showView(roleSelectionView); }
-document.getElementById('op-back-to-menu-btn').addEventListener('click', backToMenu);
-document.getElementById('viewer-back-to-menu-btn').addEventListener('click', backToMenu);
-document.getElementById('history-back-to-menu-btn').addEventListener('click', backToMenu);
-document.getElementById('settings-back-to-menu-btn').addEventListener('click', backToMenu);
-document.getElementById('closeorders-back-to-menu-btn').addEventListener('click', backToMenu);
 
 document.querySelectorAll('.keypad-btn').forEach(btn => btn.addEventListener('click', () => {
   const display = document.getElementById('code-display');
@@ -482,6 +468,13 @@ document.querySelectorAll('.source-btn').forEach(btn => btn.addEventListener('cl
     currentSource = source;
   }
 }));
+const noteInputEl = document.getElementById('note-input');
+document.getElementById('note-bags-btn').addEventListener('click', () => {
+  if (noteInputEl) noteInputEl.value = 'Varias bolsas';
+});
+document.getElementById('note-cash-btn').addEventListener('click', () => {
+  if (noteInputEl) noteInputEl.value = 'Efectivo';
+});
 document.getElementById('submit-code-btn').addEventListener('click', () => {
   const code = document.getElementById('code-display').textContent;
   const noteInput = document.getElementById('note-input');
@@ -515,124 +508,9 @@ document.getElementById('delete-history-btn').addEventListener('click', async ()
     showNotification("Historial borrado correctamente.");
   }
 });
-
-function populateSettingsForm() {
-  document.getElementById('blink-minutes-input').value = userSettings.blinkMinutes;
-  document.getElementById('critical-minutes-input').value = userSettings.criticalMinutes;
-  document.getElementById('scroll-speed-input').value = userSettings.scrollSpeed;
-  document.getElementById('viewer-size-input').value = userSettings.viewerSize;
-  document.getElementById('calculator-size-input').value = userSettings.calculatorSize;
-  document.getElementById('viewer-text-input').value = userSettings.viewerFooterText;
-  document.getElementById('viewer-footer-size-input').value = userSettings.viewerFooterSize;
-}
-document.getElementById('save-settings-btn').addEventListener('click', async () => {
-  const userId = auth.currentUser?.uid;
-  if (!userId) return;
-  const newSettings = {
-    blinkMinutes: parseInt(document.getElementById('blink-minutes-input').value) || 5,
-    criticalMinutes: parseInt(document.getElementById('critical-minutes-input').value) || 15,
-    scrollSpeed: parseInt(document.getElementById('scroll-speed-input').value) || 3,
-    viewerSize: parseInt(document.getElementById('viewer-size-input').value) || 3,
-    calculatorSize: parseInt(document.getElementById('calculator-size-input').value) || 4,
-    viewerFooterText: document.getElementById('viewer-text-input').value || "⬅️ para retirar",
-    viewerFooterSize: parseInt(document.getElementById('viewer-footer-size-input').value) || 3,
-  };
-  const sessionDocRef = doc(db, "sessions", userId);
-  await updateDoc(sessionDocRef, { settings: newSettings });
-  showNotification("Configuración guardada.");
-  backToMenu();
-});
-
-const calculatorOverlay = document.getElementById('calculator-overlay');
-const calculatorModal = document.getElementById('calculator-modal');
-let calcState = { displayValue: '0', firstOperand: null, waitingForSecondOperand: false, operator: null, expression: '' };
-
-function updateCalcDisplay() {
-  document.getElementById('calc-display').textContent = calcState.displayValue;
-  document.getElementById('calc-expression-display').textContent = calcState.expression;
-}
-
-document.getElementById('open-calculator-btn').addEventListener('click', () => {
-  const calcSizes = ['w-64','w-72','w-80','w-96','w-[28rem]','w-[32rem]','w-[36rem]','w-[40rem]'];
-  calculatorModal.className = 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-2xl transition-transform transform open';
-  calculatorModal.classList.add(calcSizes[userSettings.calculatorSize - 1] || calcSizes[3]);
-  calculatorOverlay.classList.remove('hidden');
-});
-calculatorOverlay.addEventListener('click', (e) => {
-  if (e.target === calculatorOverlay) {
-    calculatorModal.classList.remove('open');
-    calculatorOverlay.classList.add('hidden');
-  }
-});
-document.getElementById('calc-buttons').addEventListener('click', (e) => {
-  const { target } = e;
-  if (!target.matches('button')) return;
-  const key = target.textContent;
-
-  if (key === 'C') {
-    calcState = { displayValue:'0', firstOperand:null, waitingForSecondOperand:false, operator:null, expression:'' };
-  } else if (!isNaN(parseFloat(key)) || key === '.') {
-    if (calcState.waitingForSecondOperand) {
-      calcState.displayValue = key;
-      calcState.waitingForSecondOperand = false;
-    } else {
-      calcState.displayValue = calcState.displayValue === '0' ? key : (calcState.displayValue + key);
-    }
-  } else if (['+','-','*','/'].includes(key)) {
-    const inputValue = parseFloat(calcState.displayValue);
-    if (calcState.operator && calcState.waitingForSecondOperand)  {
-      calcState.operator = key;
-      calcState.expression = `${calcState.firstOperand} ${key}`;
-      return;
-    }
-    if (calcState.firstOperand == null) {
-      calcState.firstOperand = inputValue;
-    } else if (calcState.operator) {
-      const result = performCalculation[calcState.operator](calcState.firstOperand, inputValue);
-      calcState.displayValue = `${parseFloat(result.toFixed(7))}`;
-      calcState.firstOperand = result;
-    }
-    calcState.waitingForSecondOperand = true;
-    calcState.operator = key;
-    calcState.expression = `${calcState.firstOperand} ${key}`;
-  } else if (key === '=') {
-    if (calcState.operator == null || calcState.waitingForSecondOperand) return;
-    const inputValue = parseFloat(calcState.displayValue);
-    calcState.expression = `${calcState.firstOperand} ${calcState.operator} ${inputValue} =`;
-    const result = performCalculation[calcState.operator](calcState.firstOperand, inputValue);
-    calcState.displayValue = `${parseFloat(result.toFixed(7))}`;
-    calcState.firstOperand = null;
-    calcState.operator = null;
-    calcState.waitingForSecondOperand = true;
-  }
-  updateCalcDisplay();
-});
-const performCalculation = {
-  '/': (first, second) => first / second,
-  '*': (first, second) => first * second,
-  '+': (first, second) => first + second,
-  '-': (first, second) => first - second,
-};
-
-const rappicargoOverlay = document.getElementById('rappicargo-overlay');
-const rappicargoModal = document.getElementById('rappicargo-modal');
-document.getElementById('cancel-rappicargo-btn').addEventListener('click', () => {
-  rappicargoModal.classList.remove('open');
-  rappicargoOverlay.classList.add('hidden');
-});
-document.getElementById('save-rappicargo-btn').addEventListener('click', () => {
-  const nameInput = document.getElementById('rappicargo-name-input');
-  const name = String(nameInput.value || '').trim();
-  if (name) {
-    addCode(name, 'RappiCargo', 'name');
-    nameInput.value = '';
-    rappicargoModal.classList.remove('open');
-    rappicargoOverlay.classList.add('hidden');
-  } else {
-    showNotification("Por favor, ingresa un nombre.", "error");
-  }
-});
-
 registerAuthHandlers();
 registerNavigationEvents({ setupRoleView, backToMenu, handleLogout });
+registerSettingsHandlers({ backToMenu });
+initCalculator();
+initRappicargo(addCode);
 
