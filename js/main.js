@@ -125,7 +125,7 @@ function isDuplicate(code, source) {
   return (sessionData.codes || []).some(c => String(c.code).trim() === normalized && c.source === source);
 }
 
-async function addCode(code, source, type = 'code') {
+async function addCode(code, source, type = 'code', note = '') {
   const userId = auth.currentUser?.uid;
   if (!userId) return;
 
@@ -140,7 +140,7 @@ async function addCode(code, source, type = 'code') {
     return;
   }
 
-  const newCode = { id: crypto.randomUUID(), code: codeTrim, source, timestamp: new Date(), type };
+  const newCode = { id: crypto.randomUUID(), code: codeTrim, source, note: note.trim(), timestamp: new Date(), type };
   const sessionDocRef = doc(db, "sessions", userId);
   await updateDoc(sessionDocRef, { codes: [newCode, ...sessionData.codes] });
 }
@@ -199,6 +199,7 @@ function renderOperatorList(codes) {
               ${isCritical ? '<span class="text-xs text-red-600 dark:text-red-300">Revisar si está cancelado</span>' : ''}
             </div>
             <span class="text-xs font-semibold">${c.source}</span>
+            ${c.note ? `<span class="text-sm break-words mt-1">${c.note}</span>` : ''}
           </div>
           <button data-id="${c.id}" class="delete-btn ml-auto p-2 rounded-full hover:bg-red-200 dark:hover:bg-red-800/50" title="Mover a historial">
             <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -321,7 +322,7 @@ function renderHistoryList(history) {
   const tableBody = document.getElementById('history-table-body');
   tableBody.innerHTML = '';
   if (history.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-8">No hay historial de pedidos.</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="6" class="text-center py-8">No hay historial de pedidos.</td></tr>`;
     return;
   }
   history.forEach(c => {
@@ -339,6 +340,7 @@ function renderHistoryList(history) {
         <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700">
           <th scope="row" class="px-6 py-4 font-medium text-gray-900 whitespace-nowrap dark:text-white">${c.code}</th>
           <td class="px-6 py-4">${c.source}</td>
+          <td class="px-6 py-4">${c.note || ''}</td>
           <td class="px-6 py-4">${created ? created.toLocaleString() : 'N/A'}</td>
           <td class="px-6 py-4">${deleted ? deleted.toLocaleString() : 'N/A'}</td>
           <td class="px-6 py-4">${duration}</td>
@@ -417,6 +419,7 @@ function renderCloseOrders(filter='all') {
               <div class="min-w-0">
                 <p class="font-black text-2xl tracking-tight truncate">${i.code}</p>
                 <p class="text-xs text-gray-500">${i.type === 'name' ? 'Nombre' : 'Código'} • ${new Date((i.timestamp?.seconds||0)*1000).toLocaleTimeString()}</p>
+                ${i.note ? `<p class="text-sm break-words mt-1">${i.note}</p>` : ''}
               </div>
               <button class="finish-item bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm co-btn" data-id="${i.id}">
                 Finalizar
@@ -481,9 +484,12 @@ document.querySelectorAll('.source-btn').forEach(btn => btn.addEventListener('cl
 }));
 document.getElementById('submit-code-btn').addEventListener('click', () => {
   const code = document.getElementById('code-display').textContent;
+  const noteInput = document.getElementById('note-input');
+  const note = noteInput ? noteInput.value : '';
   if (code && currentSource) {
-    addCode(code, currentSource);
+    addCode(code, currentSource, 'code', note);
     document.getElementById('code-display').textContent = '';
+    if (noteInput) noteInput.value = '';
     document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
     currentSource = null;
   } else { showNotification("Ingresa un código y selecciona un origen", "error"); }
