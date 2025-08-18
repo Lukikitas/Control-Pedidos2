@@ -494,6 +494,46 @@ document.getElementById('operator-code-list').addEventListener('click', e => {
   if (deleteBtn) deleteCode(deleteBtn.dataset.id);
 });
 
+document.getElementById('toggle-layout-btn').addEventListener('click', (e) => {
+  const operatorGrid = document.getElementById('operator-grid');
+  const keypadPanel = document.getElementById('operator-keypad-panel');
+  const noteBagsBtn = document.getElementById('note-bags-btn');
+  const noteCashBtn = document.getElementById('note-cash-btn');
+  const toggleBtn = e.currentTarget;
+
+  const isCompact = operatorGrid.classList.contains('lg:grid-cols-3');
+
+  if (isCompact) {
+    // Agrandar lista, achicar teclado
+    operatorGrid.classList.replace('lg:grid-cols-3', 'lg:grid-cols-2');
+    keypadPanel.classList.remove('lg:col-span-2');
+
+    // Achicar botones de nota
+    noteBagsBtn.classList.replace('text-lg', 'text-xs');
+    noteBagsBtn.classList.replace('py-3', 'py-1');
+    noteBagsBtn.classList.replace('px-4', 'px-2');
+    noteCashBtn.classList.replace('text-lg', 'text-xs');
+    noteCashBtn.classList.replace('py-3', 'py-1');
+    noteCashBtn.classList.replace('px-4', 'px-2');
+
+    toggleBtn.textContent = 'Compactar';
+  } else {
+    // Achicar lista, agrandar teclado
+    operatorGrid.classList.replace('lg:grid-cols-2', 'lg:grid-cols-3');
+    keypadPanel.classList.add('lg:col-span-2');
+
+    // Agrandar botones de nota
+    noteBagsBtn.classList.replace('text-xs', 'text-lg');
+    noteBagsBtn.classList.replace('py-1', 'py-3');
+    noteBagsBtn.classList.replace('px-2', 'px-4');
+    noteCashBtn.classList.replace('text-xs', 'text-lg');
+    noteCashBtn.classList.replace('py-1', 'py-3');
+    noteCashBtn.classList.replace('px-2', 'px-4');
+
+    toggleBtn.textContent = 'Expandir';
+  }
+});
+
 document.getElementById('history-search-input').addEventListener('input', filterAndRenderHistory);
 document.getElementById('history-filter-select').addEventListener('change', filterAndRenderHistory);
 document.getElementById('export-pdf-btn').addEventListener('click', () => {

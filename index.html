@@ -74,13 +74,14 @@
 
     <!-- Operador -->
     <div id="operator-view" class="hidden">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 sm:p-6 flex flex-col">
+      <div id="operator-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div id="operator-keypad-panel" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 sm:p-6 flex flex-col">
           <div class="flex flex-wrap justify-between items-center mb-4 gap-y-2">
             <h2 class="text-xl font-bold">Operador</h2>
             <div class="flex items-center gap-2 sm:gap-4 flex-wrap">
               <button id="op-back-to-menu-btn" class="text-sm text-gray-500 hover:underline">Menú</button>
-              <button id="switch-to-viewer-btn" class="text-sm text-blue-600 hover:underline">Visualizador</button>
+              <button id="toggle-layout-btn" class="text-sm text-green-600 hover:underline">Compactar</button>
+              <button id="switch-to-closeorders-btn" class="text-sm text-blue-600 hover:underline">Cierre de pedidos</button>
               <button id="op-logout-btn" class="text-sm text-red-600 hover:underline">Salir</button>
             </div>
           </div>
@@ -120,7 +121,7 @@
           <button id="open-calculator-btn" class="w-full bg-blue-600 text-white rounded-lg p-4 text-lg font-semibold hover:bg-blue-700 transition">Abrir calculadora 📟</button>
         </div>
 
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
+        <div id="operator-list-panel" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
           <h2 class="text-xl font-bold mb-4">Pedidos Activos</h2>
           <div id="operator-code-list" class="space-y-2 h-[600px] overflow-y-auto pr-2"></div>
         </div>
@@ -147,10 +148,11 @@
     <!-- Cierre pedidos -->
     <div id="closeorders-view" class="hidden">
       <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 sm:p-6">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div class="flex flex-wrap justify-between items-center mb-4 gap-y-2">
           <h2 class="text-xl font-black">Cierre de pedidos</h2>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 sm:gap-4 flex-wrap">
             <button id="closeorders-back-to-menu-btn" class="text-sm text-gray-500 hover:underline">Menú</button>
+            <button id="switch-to-operator-from-closeorders-btn" class="text-sm text-blue-600 hover:underline">Operador</button>
             <button id="closeorders-logout-btn" class="text-sm text-red-600 hover:underline">Salir</button>
           </div>
         </div>
