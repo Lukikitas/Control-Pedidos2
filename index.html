@@ -74,18 +74,25 @@
 
     <!-- Operador -->
     <div id="operator-view" class="hidden">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 sm:p-6 flex flex-col">
+      <div id="operator-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div id="operator-keypad-panel" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 sm:p-6 flex flex-col">
           <div class="flex flex-wrap justify-between items-center mb-4 gap-y-2">
             <h2 class="text-xl font-bold">Operador</h2>
             <div class="flex items-center gap-2 sm:gap-4 flex-wrap">
               <button id="op-back-to-menu-btn" class="text-sm text-gray-500 hover:underline">Menú</button>
-              <button id="switch-to-viewer-btn" class="text-sm text-blue-600 hover:underline">Visualizador</button>
+              <button id="toggle-layout-btn" class="text-sm text-green-600 hover:underline">Expandir</button>
+              <button id="switch-to-closeorders-btn" class="text-sm text-blue-600 hover:underline">Cierre de pedidos</button>
               <button id="op-logout-btn" class="text-sm text-red-600 hover:underline">Salir</button>
             </div>
           </div>
 
-          <div id="code-display" class="w-full text-center text-5xl font-mono tracking-widest px-4 py-3 bg-gray-100 dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 rounded-lg mb-4 h-20 flex items-center justify-center"></div>
+          <div class="flex items-center gap-2 mb-4">
+            <div id="code-display" class="flex-1 text-center text-5xl font-mono tracking-widest px-4 py-3 bg-gray-100 dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 rounded-lg h-20 flex items-center justify-center"></div>
+            <button id="voice-input-btn" class="p-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 h-20 aspect-square flex items-center justify-center" title="Ingresar por voz">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+            </button>
+          </div>
+          <div id="voice-status" class="text-center text-sm text-gray-500 mb-4 h-5"></div>
 
           <div class="grid grid-cols-3 gap-2 mb-4">
             <button class="keypad-btn text-2xl font-bold py-4 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">1</button>
@@ -120,7 +127,7 @@
           <button id="open-calculator-btn" class="w-full bg-blue-600 text-white rounded-lg p-4 text-lg font-semibold hover:bg-blue-700 transition">Abrir calculadora 📟</button>
         </div>
 
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
+        <div id="operator-list-panel" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
           <h2 class="text-xl font-bold mb-4">Pedidos Activos</h2>
           <div id="operator-code-list" class="space-y-2 h-[600px] overflow-y-auto pr-2"></div>
         </div>
@@ -147,10 +154,11 @@
     <!-- Cierre pedidos -->
     <div id="closeorders-view" class="hidden">
       <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 sm:p-6">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div class="flex flex-wrap justify-between items-center mb-4 gap-y-2">
           <h2 class="text-xl font-black">Cierre de pedidos</h2>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 sm:gap-4 flex-wrap">
             <button id="closeorders-back-to-menu-btn" class="text-sm text-gray-500 hover:underline">Menú</button>
+            <button id="switch-to-operator-from-closeorders-btn" class="text-sm text-blue-600 hover:underline">Operador</button>
             <button id="closeorders-logout-btn" class="text-sm text-red-600 hover:underline">Salir</button>
           </div>
         </div>
@@ -295,6 +303,22 @@
       <div class="flex justify-end gap-2 mt-4">
         <button id="cancel-rappicargo-btn" class="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 dark:bg-gray-600 dark:text-white">Cancelar</button>
         <button id="save-rappicargo-btn" class="bg-orange-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-orange-600">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Voice Confirmation -->
+  <div id="voice-confirmation-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-40 flex items-center justify-center p-4">
+    <div id="voice-confirmation-modal" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-2xl w-full max-w-sm text-center">
+      <h3 class="text-lg font-bold mb-4">Confirmar Pedido por Voz</h3>
+      <p class="text-gray-600 dark:text-gray-300 mb-2">Se ingresará el siguiente pedido:</p>
+      <div class="my-4">
+        <p class="text-4xl font-mono tracking-wider" id="voice-result-code"></p>
+        <p class="text-xl font-semibold" id="voice-result-source"></p>
+      </div>
+      <div class="flex justify-center gap-4 mt-6">
+        <button id="voice-confirm-discard-btn" class="bg-gray-200 text-gray-800 font-bold py-2 px-6 rounded-lg hover:bg-gray-300 dark:bg-gray-600 dark:text-white">Descartar</button>
+        <button id="voice-confirm-save-btn" class="bg-green-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-700">Guardar</button>
       </div>
     </div>
   </div>
