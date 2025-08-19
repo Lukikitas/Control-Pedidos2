@@ -11,7 +11,7 @@ function parseCommand(text) {
   // Check for sources with priority for multi-word phrases
   if (cleanText.includes('rappi cargo') || cleanText.includes('cargo') || cleanText.includes('rapi cargo')) {
     source = 'RappiCargo';
-  } else if (cleanText.includes('pedidos ya') || cleanText.includes('pedidosya') || cleanText.includes('peya') || cleanText.includes('pedido yas') || cleanText.includes('pedidoya') || cleanText.includes('pedido ya')) {
+  } else if (cleanText.includes('pedidos ya') || cleanText.includes('pedidosya') || cleanText.includes('peya') || cleanText.includes('pedido yas') || cleanText.includes('pedidoya') || cleanText.includes('pedido ya') || cleanText.includes('pesa')) {
     source = 'PedidosYa';
   } else if (cleanText.includes('mercado pago') || cleanText.includes('mercadopago') || cleanText.includes('mp') || cleanText.includes('mercado')) {
     source = 'MercadoPago';
