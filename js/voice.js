@@ -9,9 +9,9 @@ function parseCommand(text) {
   let source = null;
 
   // Check for sources with priority for multi-word phrases
-  if (cleanText.includes('rappi cargo') || cleanText.includes('rappicargo')) {
+  if (cleanText.includes('rappi cargo') || cleanText.includes('cargo') || cleanText.includes('cargo')) {
     source = 'RappiCargo';
-  } else if (cleanText.includes('pedidos ya') || cleanText.includes('pedidosya') || cleanText.includes('peya') || cleanText.includes('pedido yas')) {
+  } else if (cleanText.includes('pedidos ya') || cleanText.includes('pedidosya') || cleanText.includes('peya') || cleanText.includes('pedido yas') || cleanText.includes('pesa')) {
     source = 'PedidosYa';
   } else if (cleanText.includes('mercado pago') || cleanText.includes('mercadopago') || cleanText.includes('mp') || cleanText.includes('mercado')) {
     source = 'MercadoPago';
