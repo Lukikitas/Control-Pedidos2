@@ -119,7 +119,7 @@ function isDuplicate(code, source) {
   return (sessionData.codes || []).some(c => String(c.code).trim() === normalized && c.source === source);
 }
 
-async function addCode(code, source, type = 'code', note = '') {
+function addCode(code, source, type = 'code', note = '') {
   const userId = auth.currentUser?.uid;
   if (!userId) return;
 
@@ -134,27 +134,66 @@ async function addCode(code, source, type = 'code', note = '') {
     return;
   }
 
+  // --- Optimistic UI Update ---
+  // 1. Create the new object and update local state
   const newCode = { id: crypto.randomUUID(), code: codeTrim, source, note: note.trim(), timestamp: new Date(), type };
+  sessionData.codes = [newCode, ...sessionData.codes];
+
+  // 2. Re-render the UI immediately
+  const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
+  renderOperatorList(operatorCodes);
+  // --- End Optimistic UI Update ---
+
+  // 3. Persist change to Firestore in the background
   const sessionDocRef = doc(db, "sessions", userId);
-  await updateDoc(sessionDocRef, { codes: [newCode, ...sessionData.codes] });
+  updateDoc(sessionDocRef, { codes: sessionData.codes }) // Use the already updated array
+    .catch(err => {
+      console.error("Failed to add code to Firestore:", err);
+      showNotification("Error al guardar pedido.", "error");
+      // Revert the optimistic update on failure
+      sessionData.codes = sessionData.codes.filter(c => c.id !== newCode.id);
+      const revertedOperatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
+      renderOperatorList(revertedOperatorCodes);
+    });
 }
 
-async function deleteCode(codeId) {
+function deleteCode(codeId) {
   const userId = auth.currentUser?.uid;
   if (!userId) return;
+
   const codeToMove = sessionData.codes.find(c => c.id === codeId);
   if (!codeToMove) return;
 
+  // --- Optimistic UI Update ---
+  // 1. Update local state immediately
   codeToMove.deletedAt = new Date();
   const newCodesArray = sessionData.codes.filter(c => c.id !== codeId);
   const newHistoryArray = [codeToMove, ...sessionData.history];
 
+  sessionData.codes = newCodesArray;
+  sessionData.history = newHistoryArray;
+
+  // 2. Re-render the UI with the new local state
+  const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
+  renderOperatorList(operatorCodes);
+  // Also re-render close orders view if it's active
+  if (!closeOrdersView.classList.contains('hidden')) {
+    renderCloseOrders(activeFilter);
+  }
+  // --- End Optimistic UI Update ---
+
+  // 3. Persist change to Firestore in the background
   const sessionDocRef = doc(db, "sessions", userId);
-  await updateDoc(sessionDocRef, { codes: newCodesArray, history: newHistoryArray });
+  updateDoc(sessionDocRef, { codes: newCodesArray, history: newHistoryArray })
+    .catch(err => {
+      console.error("Failed to delete code from Firestore:", err);
+      showNotification("Error al sincronizar borrado.", "error");
+      // The UI will be out of sync, but onSnapshot will eventually correct it.
+    });
 }
 
-async function completeCode(codeId) {
-  await deleteCode(codeId);
+function completeCode(codeId) {
+  deleteCode(codeId);
   showNotification('Pedido marcado como FINALIZADO.');
 }
 
