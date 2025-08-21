@@ -3,21 +3,20 @@ const numberWords = {
   cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
 };
 
-function parseCommand(text) {
+function parseCommand(text, voiceAliases) {
   const cleanText = text.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"");
-
   let source = null;
 
-  // Check for sources with priority for multi-word phrases
-  if (cleanText.includes('rappi cargo') || cleanText.includes('cargo') || cleanText.includes('cargo')) {
-    source = 'RappiCargo';
-  } else if (cleanText.includes('pedidos ya') || cleanText.includes('pedidosya') || cleanText.includes('peya') || cleanText.includes('pedido yas') || cleanText.includes('pesa')) {
-    source = 'PedidosYa';
-  } else if (cleanText.includes('mercado pago') || cleanText.includes('mercadopago') || cleanText.includes('mp') || cleanText.includes('mercado')) {
-    source = 'MercadoPago';
-  } else if (cleanText.includes('rappi') || cleanText.includes('rapi')) {
-    // This is checked last to avoid matching other sources
-    source = 'Rappi';
+  // Define the order of sources to check, to handle cases like "RappiCargo" vs "Rappi"
+  const sourceCheckOrder = ['RappiCargo', 'PedidosYa', 'MercadoPago', 'Rappi'];
+
+  // Iterate through the sources in the correct order
+  for (const sourceName of sourceCheckOrder) {
+    const aliases = voiceAliases[sourceName]?.split(',').map(a => a.trim().toLowerCase()) || [];
+    if (aliases.some(alias => cleanText.includes(alias))) {
+      source = sourceName;
+      break; // Stop after finding the first match
+    }
   }
 
   // Extract numbers
@@ -34,7 +33,7 @@ function parseCommand(text) {
   return { code: numbers, source: source };
 }
 
-export function initVoiceRecognition(statusDisplay, button, showConfirmationCallback) {
+export function initVoiceRecognition(statusDisplay, button, showConfirmationCallback, getSessionData) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     statusDisplay.textContent = 'El reconocimiento de voz no es compatible.';
@@ -53,7 +52,6 @@ export function initVoiceRecognition(statusDisplay, button, showConfirmationCall
       return;
     }
 
-    // --- Create a new recognition session on each click ---
     recognition = new SpeechRecognition();
     recognition.lang = 'es-ES';
     recognition.continuous = true;
@@ -71,7 +69,7 @@ export function initVoiceRecognition(statusDisplay, button, showConfirmationCall
       statusDisplay.textContent = '';
       button.classList.remove('animate-pulse', 'bg-red-600');
       button.classList.add('bg-blue-600');
-      recognition = null; // Allow for garbage collection
+      recognition = null;
     };
 
     recognition.onerror = (event) => {
@@ -88,7 +86,15 @@ export function initVoiceRecognition(statusDisplay, button, showConfirmationCall
       console.log("Transcript:", transcript);
       statusDisplay.textContent = `Detectado: "${transcript}"`;
 
-      const command = parseCommand(transcript);
+      const sessionData = getSessionData();
+      const voiceAliases = sessionData.settings?.voiceAliases;
+
+      if (!voiceAliases) {
+        console.error("Voice aliases not found in settings.");
+        return;
+      }
+
+      const command = parseCommand(transcript, voiceAliases);
 
       if (command.source && command.code && command.code.length >= 3) {
         console.log("Complete command detected:", command);

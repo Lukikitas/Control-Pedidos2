@@ -9,6 +9,12 @@ export const userSettings = {
   calculatorSize: 4,
   viewerFooterText: "⬅️ para retirar",
   viewerFooterSize: 3,
+  voiceAliases: {
+    'PedidosYa': 'pedidos ya,pedidosya,peya,pedido yas,pesa,pedido ya,ya',
+    'Rappi': 'rappi,rapi',
+    'RappiCargo': 'rappi cargo,cargo',
+    'MercadoPago': 'mercado pago,mercadopago,mp,mercado',
+  },
 };
 
 export function updateLocalSettings(newSettings = {}) {
@@ -23,6 +29,13 @@ export function populateSettingsForm() {
   document.getElementById('calculator-size-input').value = userSettings.calculatorSize;
   document.getElementById('viewer-text-input').value = userSettings.viewerFooterText;
   document.getElementById('viewer-footer-size-input').value = userSettings.viewerFooterSize;
+
+  // Populate voice alias fields
+  const aliases = userSettings.voiceAliases || {};
+  document.getElementById('alias-pedidosya-input').value = aliases.PedidosYa || '';
+  document.getElementById('alias-rappi-input').value = aliases.Rappi || '';
+  document.getElementById('alias-rappicargo-input').value = aliases.RappiCargo || '';
+  document.getElementById('alias-mercadopago-input').value = aliases.MercadoPago || '';
 }
 
 export function registerSettingsHandlers({ backToMenu }) {
@@ -37,6 +50,12 @@ export function registerSettingsHandlers({ backToMenu }) {
       calculatorSize: parseInt(document.getElementById('calculator-size-input').value) || 4,
       viewerFooterText: document.getElementById('viewer-text-input').value || "⬅️ para retirar",
       viewerFooterSize: parseInt(document.getElementById('viewer-footer-size-input').value) || 3,
+      voiceAliases: {
+        'PedidosYa': document.getElementById('alias-pedidosya-input').value,
+        'Rappi': document.getElementById('alias-rappi-input').value,
+        'RappiCargo': document.getElementById('alias-rappicargo-input').value,
+        'MercadoPago': document.getElementById('alias-mercadopago-input').value
+      }
     };
     const sessionDocRef = doc(db, 'sessions', userId);
     await updateDoc(sessionDocRef, { settings: newSettings });
