@@ -1,4 +1,4 @@
-import { auth, db, doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, onAuthStateChanged } from './firebase.js';
+import { auth, db, collection, doc, addDoc, deleteDoc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, onAuthStateChanged, arrayUnion, arrayRemove, writeBatch } from './firebase.js';
 import { showNotification, fitTextToContainer } from './utils.js';
 import { userSettings, updateLocalSettings, populateSettingsForm, registerSettingsHandlers } from './settings.js';
 import { initCalculator } from './calculator.js';
@@ -10,6 +10,7 @@ import { initVoiceRecognition } from './voice.js';
 const { jsPDF } = window.jspdf;
 
 let unsubscribeFromCodes = null;
+let unsubscribeFromSession = null;
 let sessionData = { codes: [], history: [], settings: {} };
 let currentSource = null;
 let scrollInterval = null;
@@ -44,6 +45,7 @@ onAuthStateChanged(auth, user => {
     listenForCodes(user.uid);
   } else {
     if (unsubscribeFromCodes) unsubscribeFromCodes();
+    if (unsubscribeFromSession) unsubscribeFromSession();
     if (oldOrdersInterval) clearInterval(oldOrdersInterval);
     localStorage.removeItem('userRole');
     previousCodesCount = 0;
@@ -83,33 +85,66 @@ function setupRoleView(role) {
 }
 
 function listenForCodes(userId) {
+  // Clear previous listeners
   if (unsubscribeFromCodes) unsubscribeFromCodes();
-  const sessionDocRef = doc(db, "sessions", userId);
+  if (unsubscribeFromSession) unsubscribeFromSession();
 
-  getDoc(sessionDocRef).then(docSnap => {
-    if (!docSnap.exists()) {
-      setDoc(sessionDocRef, { createdAt: serverTimestamp(), codes: [], history: [], settings: userSettings });
+  // Listener for session document (settings, history)
+  const sessionDocRef = doc(db, "sessions", userId);
+  unsubscribeFromSession = onSnapshot(sessionDocRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      sessionData.history = data.history || [];
+      sessionData.settings = data.settings || userSettings;
+      updateLocalSettings(sessionData.settings);
+      filterAndRenderHistory();
     }
   });
 
-  unsubscribeFromCodes = onSnapshot(sessionDocRef, (docSnap) => {
-    if (docSnap.exists()) {
-      sessionData = docSnap.data();
-      sessionData.codes = sessionData.codes || [];
-      sessionData.history = sessionData.history || [];
-      updateLocalSettings(sessionData.settings);
+  // Listener for the 'codes' subcollection
+  const codesCollectionRef = collection(db, "sessions", userId, "codes");
 
-      const isNewCode = sessionData.codes.length > previousCodesCount;
-      previousCodesCount = sessionData.codes.length;
+  let initialDataLoaded = false;
 
-      const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
-      const viewerCodes = [...sessionData.codes].sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
-      sessionData.history.sort((a, b) => (b.deletedAt?.seconds || 0) - (a.deletedAt?.seconds || 0));
+  unsubscribeFromCodes = onSnapshot(codesCollectionRef, (snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+      const docData = change.doc.data();
+      const codeData = { id: change.doc.id, ...docData };
 
-      renderOperatorList(operatorCodes);
-      renderViewerList(viewerCodes, isNewCode);
-      filterAndRenderHistory();
-      if (!closeOrdersView.classList.contains('hidden')) renderCloseOrders(activeFilter);
+      if (change.type === "added") {
+        sessionData.codes = sessionData.codes.filter(c => c.id !== codeData.id);
+        sessionData.codes.push(codeData);
+      }
+      if (change.type === "modified") {
+        const index = sessionData.codes.findIndex(c => c.id === codeData.id);
+        if (index > -1) sessionData.codes[index] = codeData;
+      }
+      if (change.type === "removed") {
+        sessionData.codes = sessionData.codes.filter(c => c.id !== codeData.id);
+      }
+    });
+
+    const getMs = (timestamp) => (timestamp?.seconds ? timestamp.seconds * 1000 : timestamp?.getTime()) || 0;
+
+    sessionData.codes.sort((a, b) => getMs(a.timestamp) - getMs(b.timestamp));
+
+    const viewerCodes = [...sessionData.codes].reverse();
+
+    const isNewCode = initialDataLoaded && snapshot.docChanges().some(c => c.type === 'added');
+
+    renderOperatorList(sessionData.codes);
+    renderViewerList(viewerCodes, isNewCode);
+    if (!closeOrdersView.classList.contains('hidden')) {
+      renderCloseOrders(activeFilter);
+    }
+
+    initialDataLoaded = true;
+  });
+
+  // Ensure session document exists
+  getDoc(sessionDocRef).then(docSnap => {
+    if (!docSnap.exists()) {
+      setDoc(sessionDocRef, { createdAt: serverTimestamp(), history: [], settings: userSettings });
     }
   });
 }
@@ -122,75 +157,64 @@ function isDuplicate(code, source) {
 
 function addCode(code, source, type = 'code', note = '') {
   const userId = auth.currentUser?.uid;
-  if (!userId) return;
+  if (!userId) return Promise.reject(new Error("User not logged in."));
 
   const codeTrim = String(code).trim();
   if (!codeTrim || !source) {
     showNotification("Ingresa un código y selecciona un origen", "error");
-    return;
+    return Promise.reject(new Error("Code or source missing."));
   }
 
   if (isDuplicate(codeTrim, source)) {
     showNotification("Este pedido ya fue ingresado", "error");
-    return;
+    return Promise.reject(new Error("Duplicate code."));
   }
 
-  // --- Optimistic UI Update ---
-  // 1. Create the new object and update local state
-  const newCode = { id: crypto.randomUUID(), code: codeTrim, source, note: note.trim(), timestamp: new Date(), type };
-  sessionData.codes = [newCode, ...sessionData.codes];
+  const newCodeData = {
+    code: codeTrim,
+    source,
+    note: note.trim(),
+    type,
+    timestamp: serverTimestamp()
+  };
 
-  // 2. Re-render the UI immediately
-  const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
-  renderOperatorList(operatorCodes);
-  // --- End Optimistic UI Update ---
+  const codesCollectionRef = collection(db, "sessions", userId, "codes");
 
-  // 3. Persist change to Firestore in the background
-  const sessionDocRef = doc(db, "sessions", userId);
-  updateDoc(sessionDocRef, { codes: sessionData.codes }) // Use the already updated array
-    .catch(err => {
-      console.error("Failed to add code to Firestore:", err);
-      showNotification("Error al guardar pedido.", "error");
-      // Revert the optimistic update on failure
-      sessionData.codes = sessionData.codes.filter(c => c.id !== newCode.id);
-      const revertedOperatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
-      renderOperatorList(revertedOperatorCodes);
-    });
+  return addDoc(codesCollectionRef, newCodeData);
 }
 
 function deleteCode(codeId) {
   const userId = auth.currentUser?.uid;
-  if (!userId) return;
+  if (!userId || !codeId) return;
 
   const codeToMove = sessionData.codes.find(c => c.id === codeId);
-  if (!codeToMove) return;
-
-  // --- Optimistic UI Update ---
-  // 1. Update local state immediately
-  codeToMove.deletedAt = new Date();
-  const newCodesArray = sessionData.codes.filter(c => c.id !== codeId);
-  const newHistoryArray = [codeToMove, ...sessionData.history];
-
-  sessionData.codes = newCodesArray;
-  sessionData.history = newHistoryArray;
-
-  // 2. Re-render the UI with the new local state
-  const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
-  renderOperatorList(operatorCodes);
-  // Also re-render close orders view if it's active
-  if (!closeOrdersView.classList.contains('hidden')) {
-    renderCloseOrders(activeFilter);
+  if (!codeToMove) {
+    console.error("Could not find code to delete in local data:", codeId);
+    return;
   }
-  // --- End Optimistic UI Update ---
 
-  // 3. Persist change to Firestore in the background
+  // Define references
+  const codeDocRef = doc(db, "sessions", userId, "codes", codeId);
   const sessionDocRef = doc(db, "sessions", userId);
-  updateDoc(sessionDocRef, { codes: newCodesArray, history: newHistoryArray })
-    .catch(err => {
-      console.error("Failed to delete code from Firestore:", err);
-      showNotification("Error al sincronizar borrado.", "error");
-      // The UI will be out of sync, but onSnapshot will eventually correct it.
-    });
+
+  // Prepare history item
+  const { id, ...historyData } = codeToMove;
+  const historyItem = {
+    ...historyData,
+    deletedAt: new Date()
+  };
+
+  // Use a batch write to atomically delete the code doc and update the history array.
+  const batch = writeBatch(db);
+
+  batch.delete(codeDocRef);
+  batch.update(sessionDocRef, { history: arrayUnion(historyItem) });
+
+  // The onSnapshot listener will automatically handle the UI update.
+  batch.commit().catch(err => {
+    console.error("Failed to delete code:", err);
+    showNotification("Error al borrar el pedido.", "error");
+  });
 }
 
 function completeCode(codeId) {
@@ -200,19 +224,21 @@ function completeCode(codeId) {
 
 function renderOperatorList(codes) {
   const listEl = document.getElementById('operator-code-list');
-  listEl.innerHTML = '';
   if (oldOrdersInterval) clearInterval(oldOrdersInterval);
 
   if (codes.length === 0) {
     listEl.innerHTML = `<p class="text-gray-500 dark:text-gray-400 text-center mt-16">No hay pedidos activos.</p>`;
     return;
   }
+
   const now = Date.now();
   const alertTime = userSettings.blinkMinutes * 60 * 1000;
   const criticalTime = userSettings.criticalMinutes * 60 * 1000;
 
-  codes.forEach(c => {
-    const ts = c.timestamp?.toDate ? c.timestamp.toDate().getTime() : 0;
+  const getMs = (timestamp) => (timestamp?.seconds ? timestamp.seconds * 1000 : timestamp?.getTime()) || 0;
+
+  const codesHtml = codes.map(c => {
+    const ts = getMs(c.timestamp);
     const age = now - ts;
     const isCritical = ts && age > criticalTime;
     const isOld = ts && age > alertTime;
@@ -225,12 +251,12 @@ function renderOperatorList(codes) {
     const style = sourceStyles[c.source] || 'bg-gray-100';
     const blinkingClass = isCritical ? 'critical-border' : isOld ? 'blinking-border' : '';
 
-    listEl.innerHTML += `
+    return `
         <div class="flex items-center justify-between p-3 ${style} rounded-lg ${blinkingClass}">
           <div class="flex flex-col">
             <div class="flex items-baseline gap-2">
               <span class="font-mono text-2xl tracking-wider font-bold">${c.code}</span>
-              ${isCritical ? '<span class="text-xs text-red-600 dark:text-red-300">Revisar si está cancelado</span>' : ''}
+              ${isCritical ? `<span class="text-xs text-red-600 dark:text-red-300">Revisar si está cancelado</span>` : ''}
             </div>
             <span class="text-xs font-semibold">${c.source}</span>
             ${c.note ? `<span class="text-sm break-words mt-1">${c.note}</span>` : ''}
@@ -239,18 +265,23 @@ function renderOperatorList(codes) {
             <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>`;
-  });
+  }).join('');
+
+  listEl.innerHTML = codesHtml;
 
   oldOrdersInterval = setInterval(() => {
-    renderOperatorList(sessionData.codes);
-    const viewerCodes = [...sessionData.codes].sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+    const getMs = (timestamp) => (timestamp?.seconds ? timestamp.seconds * 1000 : timestamp?.getTime()) || 0;
+    const operatorCodes = [...sessionData.codes].sort((a, b) => getMs(a.timestamp) - getMs(b.timestamp));
+    const viewerCodes = [...sessionData.codes].sort((a, b) => getMs(b.timestamp) - getMs(a.timestamp));
+
+    renderOperatorList(operatorCodes);
     renderViewerList(viewerCodes, false);
   }, 60000);
 }
 
 function renderViewerList(codes, isNewCode) {
   const listEl = document.getElementById('viewer-code-list');
-  listEl.innerHTML = '';
+
   if (codes.length === 0) {
     listEl.innerHTML = `<p class="viewer-no-codes text-gray-500 text-center mt-32 text-2xl col-span-full">Esperando pedidos...</p>`;
     updateViewerAutoScroll();
@@ -264,41 +295,43 @@ function renderViewerList(codes, isNewCode) {
     'MercadoPago': 'bg-yellow-400 text-black'
   };
   const sizeClasses = [
-    'text-5xl md:text-6xl',
-    'text-6xl md:text-7xl',
-    'text-7xl md:text-8xl',
-    'text-8xl md:text-9xl',
-    'text-9xl md:text-[10rem]',
-    'text-[10rem] md:text-[11rem]',
-    'text-[11rem] md:text-[12rem]',
-    'text-[12rem] md:text-[13rem]'
+    'text-5xl md:text-6xl', 'text-6xl md:text-7xl', 'text-7xl md:text-8xl',
+    'text-8xl md:text-9xl', 'text-9xl md:text-[10rem]', 'text-[10rem] md:text-[11rem]',
+    'text-[11rem] md:text-[12rem]', 'text-[12rem] md:text-[13rem]'
   ];
 
-  codes.forEach((c, index) => {
-    let sizeClass = sizeClasses[userSettings.viewerSize - 1] || sizeClasses[2];
+  const codesToFit = [];
+  const codesHtml = codes.map((c, index) => {
+    const sizeClass = sizeClasses[userSettings.viewerSize - 1] || sizeClasses[2];
     const displaySource = c.source === 'RappiCargo' ? 'Rappi' : c.source;
     const style = sourceStyles[c.source] || 'bg-gray-200';
-    const card = document.createElement('div');
-    card.className = 'bg-white rounded-xl shadow-lg p-4 flex flex-col items-center justify-center aspect-video';
-    if (index === 0 && isNewCode) card.classList.add('new-order-pop');
-    card.innerHTML = `
-        <p class="viewer-order font-black text-gray-900 ${sizeClass} tracking-tighter px-2">${c.code}</p>
-        <div class="mt-4 px-6 py-2 rounded-lg ${style}"><p class="font-bold text-xl">${displaySource}</p></div>`;
-    listEl.appendChild(card);
-    if (c.type === 'name') {
-      const textEl = card.querySelector('.viewer-order');
-      fitTextToContainer(textEl, card);
+    const popClass = (index === 0 && isNewCode) ? 'new-order-pop' : '';
+    const fitId = c.type === 'name' ? `fit-text-${c.id}` : '';
+    if (fitId) {
+        codesToFit.push({ id: fitId, containerClass: 'bg-white' });
     }
+
+    return `
+      <div class="bg-white rounded-xl shadow-lg p-4 flex flex-col items-center justify-center aspect-video ${popClass}">
+        <p id="${fitId}" class="viewer-order font-black text-gray-900 ${sizeClass} tracking-tighter px-2">${c.code}</p>
+        <div class="mt-4 px-6 py-2 rounded-lg ${style}"><p class="font-bold text-xl">${displaySource}</p></div>
+      </div>`;
+  }).join('');
+
+  listEl.innerHTML = codesHtml;
+
+  codesToFit.forEach(item => {
+      const textEl = document.getElementById(item.id);
+      if (textEl) {
+          fitTextToContainer(textEl, textEl.parentElement);
+      }
   });
 
   const footerTextEl = document.getElementById('viewer-footer-text');
   footerTextEl.textContent = userSettings.viewerFooterText;
   const footerSizeClasses = [
-    'text-xl py-3',
-    'text-2xl py-4',
-    'text-3xl py-5',
-    'text-4xl py-6',
-    'text-5xl py-7'
+    'text-xl py-3', 'text-2xl py-4', 'text-3xl py-5',
+    'text-4xl py-6', 'text-5xl py-7'
   ];
   footerTextEl.className = `text-center font-bold flex-shrink-0 bg-gray-100 dark:bg-gray-900 ${footerSizeClasses[userSettings.viewerFooterSize - 1] || footerSizeClasses[1]}`;
 
@@ -408,64 +441,64 @@ function groupBySource(codes) {
 function renderCloseOrders(filter='all') {
   if (!closeGroupsEl) return;
   const grouped = groupBySource(sessionData.codes || []);
-  const order = ['PedidosYa','Rappi','RappiCargo','MercadoPago'];
-  const keys = Object.keys(grouped).sort((a,b) => {
-    const ia = order.indexOf(a), ib = order.indexOf(b);
+  const sourceOrder = ['PedidosYa','Rappi','RappiCargo','MercadoPago'];
+
+  const sortedKeys = Object.keys(grouped).sort((a,b) => {
+    const ia = sourceOrder.indexOf(a), ib = sourceOrder.indexOf(b);
     return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
   });
 
-  closeGroupsEl.innerHTML = '';
-  let renderedAny = false;
+  const now = Date.now();
+  const alertTime = userSettings.blinkMinutes * 60 * 1000;
+  const criticalTime = userSettings.criticalMinutes * 60 * 1000;
+  const getMs = (timestamp) => (timestamp?.seconds ? timestamp.seconds * 1000 : timestamp?.getTime()) || 0;
 
-  keys.forEach(source => {
+  const groupsHtml = sortedKeys.map(source => {
     const items = grouped[source] || [];
-    if (!items.length) return;
-    if (filter !== 'all' && filter !== source) return;
+    if (!items.length || (filter !== 'all' && filter !== source)) {
+      return '';
+    }
 
-    renderedAny = true;
     const st = getSourceStyles(source);
-    const wrap = document.createElement('div');
-    wrap.className = `rounded-xl border ${st.border} ${st.light} p-3 sm:p-4`;
+    const sortedItems = items.slice().sort((a,b) => getMs(a.timestamp) - getMs(b.timestamp));
 
-    const sorted = items.slice().sort((a,b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
-    const now = Date.now();
-    const alertTime = userSettings.blinkMinutes * 60 * 1000;
-    const criticalTime = userSettings.criticalMinutes * 60 * 1000;
+    const itemsHtml = sortedItems.map(i => {
+      const ts = getMs(i.timestamp);
+      const age = now - ts;
+      const isCritical = ts && age > criticalTime;
+      const isOld = ts && age > alertTime;
+      const blinkClass = isCritical ? 'critical-border' : isOld ? 'blinking-border' : '';
+      return `
+      <div class="co-card bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-lg p-4 flex items-center justify-between ${blinkClass}">
+        <div class="min-w-0">
+          <p class="font-black text-2xl tracking-tight truncate">${i.code}</p>
+          <p class="text-xs text-gray-500">${i.type === 'name' ? 'Nombre' : 'Código'} • ${new Date(ts).toLocaleTimeString()}</p>
+          ${i.note ? `<p class="text-sm break-words mt-1">${i.note}</p>` : ''}
+        </div>
+        <button class="finish-item bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm co-btn" data-id="${i.id}">
+          Finalizar
+        </button>
+      </div>`;
+    }).join('');
 
-    wrap.innerHTML = `
+    return `
+      <div class="rounded-xl border ${st.border} ${st.light} p-3 sm:p-4">
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <div class="flex items-center gap-2">
             <span class="co-badge ${st.badge}">${source}</span>
-            <span class="text-sm font-semibold opacity-80">${sorted.length} activo${sorted.length!==1?'s':''}</span>
+            <span class="text-sm font-semibold opacity-80">${sortedItems.length} activo${sortedItems.length!==1?'s':''}</span>
           </div>
         </div>
-
         <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          ${sorted.map(i => {
-            const ts = (i.timestamp?.seconds || 0) * 1000;
-            const age = now - ts;
-            const isCritical = ts && age > criticalTime;
-            const isOld = ts && age > alertTime;
-            const blinkClass = isCritical ? 'critical-border' : isOld ? 'blinking-border' : '';
-            return `
-            <div class="co-card bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-lg p-4 flex items-center justify-between ${blinkClass}">
-              <div class="min-w-0">
-                <p class="font-black text-2xl tracking-tight truncate">${i.code}</p>
-                <p class="text-xs text-gray-500">${i.type === 'name' ? 'Nombre' : 'Código'} • ${new Date(ts).toLocaleTimeString()}</p>
-                ${i.note ? `<p class="text-sm break-words mt-1">${i.note}</p>` : ''}
-              </div>
-              <button class="finish-item bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm co-btn" data-id="${i.id}">
-                Finalizar
-              </button>
-            </div>`;
-          }).join('')}
+          ${itemsHtml}
         </div>
-      `;
-    closeGroupsEl.appendChild(wrap);
-  });
+      </div>`;
+  }).join('');
 
-  if (!renderedAny) {
+  if (!groupsHtml.trim()) {
     closeGroupsEl.innerHTML = `<p class="text-gray-500 text-center py-12">No hay pedidos activos.</p>`;
+  } else {
+    closeGroupsEl.innerHTML = groupsHtml;
   }
 }
 
@@ -522,12 +555,22 @@ document.getElementById('submit-code-btn').addEventListener('click', () => {
   const noteInput = document.getElementById('note-input');
   const note = noteInput ? noteInput.value : '';
   if (code && currentSource) {
-    addCode(code, currentSource, 'code', note);
-    document.getElementById('code-display').textContent = '';
-    if (noteInput) noteInput.value = '';
-    document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
-    currentSource = null;
-  } else { showNotification("Ingresa un código y selecciona un origen", "error"); }
+    addCode(code, currentSource, 'code', note)
+      .then(() => {
+        // Clear form only on successful database write
+        document.getElementById('code-display').textContent = '';
+        if (noteInput) noteInput.value = '';
+        document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
+        currentSource = null;
+      })
+      .catch(err => {
+        // Errors are already handled inside addCode (UI revert and notification)
+        // We can log the error here again if needed for debugging the event listener chain
+        console.log("Add code promise rejected, form will not be cleared.", err.message);
+      });
+  } else {
+    showNotification("Ingresa un código y selecciona un origen", "error");
+  }
 });
 document.getElementById('operator-code-list').addEventListener('click', e => {
   const deleteBtn = e.target.closest('.delete-btn');
