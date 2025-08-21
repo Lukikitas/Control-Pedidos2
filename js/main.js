@@ -1,4 +1,4 @@
-import { auth, db, doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, onAuthStateChanged } from './firebase.js';
+import { auth, db, doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, onAuthStateChanged, arrayUnion, arrayRemove, writeBatch } from './firebase.js';
 import { showNotification, fitTextToContainer } from './utils.js';
 import { userSettings, updateLocalSettings, populateSettingsForm, registerSettingsHandlers } from './settings.js';
 import { initCalculator } from './calculator.js';
@@ -135,19 +135,28 @@ function addCode(code, source, type = 'code', note = '') {
     return;
   }
 
-  // --- Optimistic UI Update ---
-  // 1. Create the new object and update local state
-  const newCode = { id: crypto.randomUUID(), code: codeTrim, source, note: note.trim(), timestamp: new Date(), type };
-  sessionData.codes = [newCode, ...sessionData.codes];
+  const newCode = { id: crypto.randomUUID(), code: codeTrim, source, note: note.trim(), type };
 
-  // 2. Re-render the UI immediately
-  const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
+  // --- Optimistic UI Update ---
+  // 1. Create a version of the code with a client-side timestamp.
+  const optimisticCode = { ...newCode, timestamp: new Date() };
+  sessionData.codes = [...sessionData.codes, optimisticCode]; // Append to the end
+
+  // 2. Re-render the UI immediately, using a sort function that handles both Date and Firestore Timestamps
+  const sortFn = (a, b) => {
+    const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : a.timestamp?.getTime() || 0;
+    const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : b.timestamp?.getTime() || 0;
+    return timeA - timeB;
+  };
+  const operatorCodes = [...sessionData.codes].sort(sortFn);
   renderOperatorList(operatorCodes);
   // --- End Optimistic UI Update ---
 
-  // 3. Persist change to Firestore in the background
+  // 3. Persist change to Firestore in the background using arrayUnion
   const sessionDocRef = doc(db, "sessions", userId);
-  updateDoc(sessionDocRef, { codes: sessionData.codes }) // Use the already updated array
+  const firestoreCode = { ...newCode, timestamp: serverTimestamp() };
+
+  updateDoc(sessionDocRef, { codes: arrayUnion(firestoreCode) })
     .catch(err => {
       console.error("Failed to add code to Firestore:", err);
       showNotification("Error al guardar pedido.", "error");
@@ -165,32 +174,43 @@ function deleteCode(codeId) {
   const codeToMove = sessionData.codes.find(c => c.id === codeId);
   if (!codeToMove) return;
 
+  // Create the object for the history array *before* the optimistic update.
+  const historyItem = { ...codeToMove, deletedAt: serverTimestamp() };
+  const optimisticHistoryItem = { ...codeToMove, deletedAt: new Date() };
+
   // --- Optimistic UI Update ---
-  // 1. Update local state immediately
-  codeToMove.deletedAt = new Date();
-  const newCodesArray = sessionData.codes.filter(c => c.id !== codeId);
-  const newHistoryArray = [codeToMove, ...sessionData.history];
+  const originalCodes = [...sessionData.codes];
+  const originalHistory = [...sessionData.history];
 
-  sessionData.codes = newCodesArray;
-  sessionData.history = newHistoryArray;
+  sessionData.codes = sessionData.codes.filter(c => c.id !== codeId);
+  sessionData.history = [optimisticHistoryItem, ...sessionData.history];
 
-  // 2. Re-render the UI with the new local state
   const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
   renderOperatorList(operatorCodes);
-  // Also re-render close orders view if it's active
   if (!closeOrdersView.classList.contains('hidden')) {
     renderCloseOrders(activeFilter);
   }
   // --- End Optimistic UI Update ---
 
-  // 3. Persist change to Firestore in the background
+  // --- Persist change to Firestore using a batch write ---
   const sessionDocRef = doc(db, "sessions", userId);
-  updateDoc(sessionDocRef, { codes: newCodesArray, history: newHistoryArray })
-    .catch(err => {
-      console.error("Failed to delete code from Firestore:", err);
-      showNotification("Error al sincronizar borrado.", "error");
-      // The UI will be out of sync, but onSnapshot will eventually correct it.
-    });
+  const batch = writeBatch(db);
+
+  batch.update(sessionDocRef, { codes: arrayRemove(codeToMove) });
+  batch.update(sessionDocRef, { history: arrayUnion(historyItem) });
+
+  batch.commit().catch(err => {
+    console.error("Failed to delete code with batch:", err);
+    showNotification("Error al sincronizar borrado.", "error");
+    // Revert UI to pre-update state. onSnapshot will eventually correct it anyway,
+    // but this provides a faster feedback loop for the user.
+    sessionData.codes = originalCodes;
+    sessionData.history = originalHistory;
+    renderOperatorList([...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0)));
+     if (!closeOrdersView.classList.contains('hidden')) {
+        renderCloseOrders(activeFilter);
+    }
+  });
 }
 
 function completeCode(codeId) {
