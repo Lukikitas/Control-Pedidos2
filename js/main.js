@@ -1,4 +1,4 @@
-import { auth, db, doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, onAuthStateChanged } from './firebase.js';
+import { auth, db, doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, onAuthStateChanged, arrayUnion, arrayRemove, writeBatch } from './firebase.js';
 import { showNotification, fitTextToContainer } from './utils.js';
 import { userSettings, updateLocalSettings, populateSettingsForm, registerSettingsHandlers } from './settings.js';
 import { initCalculator } from './calculator.js';
@@ -122,39 +122,58 @@ function isDuplicate(code, source) {
 
 function addCode(code, source, type = 'code', note = '') {
   const userId = auth.currentUser?.uid;
-  if (!userId) return;
+  if (!userId) return Promise.reject(new Error("User not logged in."));
 
   const codeTrim = String(code).trim();
   if (!codeTrim || !source) {
     showNotification("Ingresa un código y selecciona un origen", "error");
-    return;
+    return Promise.reject(new Error("Code or source missing."));
   }
 
   if (isDuplicate(codeTrim, source)) {
     showNotification("Este pedido ya fue ingresado", "error");
-    return;
+    return Promise.reject(new Error("Duplicate code."));
   }
 
-  // --- Optimistic UI Update ---
-  // 1. Create the new object and update local state
-  const newCode = { id: crypto.randomUUID(), code: codeTrim, source, note: note.trim(), timestamp: new Date(), type };
-  sessionData.codes = [newCode, ...sessionData.codes];
+  const newCode = {
+    id: crypto.randomUUID(),
+    code: codeTrim,
+    source,
+    note: note.trim(),
+    type,
+    timestamp: new Date()
+  };
 
-  // 2. Re-render the UI immediately
-  const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
-  renderOperatorList(operatorCodes);
+  // --- Optimistic UI Update ---
+  const originalCodes = [...sessionData.codes];
+  sessionData.codes = [...sessionData.codes, newCode];
+
+  const getMs = (timestamp) => (timestamp?.seconds ? timestamp.seconds * 1000 : timestamp?.getTime()) || 0;
+  const sortAsc = (a, b) => getMs(a.timestamp) - getMs(b.timestamp);
+  const sortDesc = (a, b) => getMs(b.timestamp) - getMs(a.timestamp);
+
+  renderOperatorList([...sessionData.codes].sort(sortAsc));
+  renderViewerList([...sessionData.codes].sort(sortDesc), true);
+  if (!closeOrdersView.classList.contains('hidden')) {
+    renderCloseOrders(activeFilter);
+  }
   // --- End Optimistic UI Update ---
 
-  // 3. Persist change to Firestore in the background
   const sessionDocRef = doc(db, "sessions", userId);
-  updateDoc(sessionDocRef, { codes: sessionData.codes }) // Use the already updated array
+  return updateDoc(sessionDocRef, { codes: arrayUnion(newCode) })
     .catch(err => {
       console.error("Failed to add code to Firestore:", err);
       showNotification("Error al guardar pedido.", "error");
-      // Revert the optimistic update on failure
-      sessionData.codes = sessionData.codes.filter(c => c.id !== newCode.id);
-      const revertedOperatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
-      renderOperatorList(revertedOperatorCodes);
+
+      sessionData.codes = originalCodes;
+
+      renderOperatorList([...sessionData.codes].sort(sortAsc));
+      renderViewerList([...sessionData.codes].sort(sortDesc), false);
+      if (!closeOrdersView.classList.contains('hidden')) {
+        renderCloseOrders(activeFilter);
+      }
+      // Re-throw the error to ensure the promise chain fails
+      throw err;
     });
 }
 
@@ -165,32 +184,46 @@ function deleteCode(codeId) {
   const codeToMove = sessionData.codes.find(c => c.id === codeId);
   if (!codeToMove) return;
 
+  // Create the history item with a client-side timestamp.
+  const historyItem = { ...codeToMove, deletedAt: new Date() };
+
   // --- Optimistic UI Update ---
-  // 1. Update local state immediately
-  codeToMove.deletedAt = new Date();
-  const newCodesArray = sessionData.codes.filter(c => c.id !== codeId);
-  const newHistoryArray = [codeToMove, ...sessionData.history];
+  const originalCodes = [...sessionData.codes];
+  const originalHistory = [...sessionData.history];
 
-  sessionData.codes = newCodesArray;
-  sessionData.history = newHistoryArray;
+  sessionData.codes = sessionData.codes.filter(c => c.id !== codeId);
+  // Use the same historyItem for the optimistic update.
+  sessionData.history = [historyItem, ...sessionData.history];
 
-  // 2. Re-render the UI with the new local state
   const operatorCodes = [...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
   renderOperatorList(operatorCodes);
-  // Also re-render close orders view if it's active
   if (!closeOrdersView.classList.contains('hidden')) {
     renderCloseOrders(activeFilter);
   }
   // --- End Optimistic UI Update ---
 
-  // 3. Persist change to Firestore in the background
+  // --- Persist change to Firestore using a batch write ---
   const sessionDocRef = doc(db, "sessions", userId);
-  updateDoc(sessionDocRef, { codes: newCodesArray, history: newHistoryArray })
-    .catch(err => {
-      console.error("Failed to delete code from Firestore:", err);
-      showNotification("Error al sincronizar borrado.", "error");
-      // The UI will be out of sync, but onSnapshot will eventually correct it.
-    });
+  const batch = writeBatch(db);
+
+  // Note: arrayRemove needs the *exact* object from the array.
+  // codeToMove does not have `deletedAt`, which is correct.
+  batch.update(sessionDocRef, { codes: arrayRemove(codeToMove) });
+  // arrayUnion will add the new history item.
+  batch.update(sessionDocRef, { history: arrayUnion(historyItem) });
+
+  batch.commit().catch(err => {
+    console.error("Failed to delete code with batch:", err);
+    showNotification("Error al sincronizar borrado.", "error");
+    // Revert UI to pre-update state. onSnapshot will eventually correct it anyway,
+    // but this provides a faster feedback loop for the user.
+    sessionData.codes = originalCodes;
+    sessionData.history = originalHistory;
+    renderOperatorList([...sessionData.codes].sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0)));
+     if (!closeOrdersView.classList.contains('hidden')) {
+        renderCloseOrders(activeFilter);
+    }
+  });
 }
 
 function completeCode(codeId) {
@@ -522,12 +555,22 @@ document.getElementById('submit-code-btn').addEventListener('click', () => {
   const noteInput = document.getElementById('note-input');
   const note = noteInput ? noteInput.value : '';
   if (code && currentSource) {
-    addCode(code, currentSource, 'code', note);
-    document.getElementById('code-display').textContent = '';
-    if (noteInput) noteInput.value = '';
-    document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
-    currentSource = null;
-  } else { showNotification("Ingresa un código y selecciona un origen", "error"); }
+    addCode(code, currentSource, 'code', note)
+      .then(() => {
+        // Clear form only on successful database write
+        document.getElementById('code-display').textContent = '';
+        if (noteInput) noteInput.value = '';
+        document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
+        currentSource = null;
+      })
+      .catch(err => {
+        // Errors are already handled inside addCode (UI revert and notification)
+        // We can log the error here again if needed for debugging the event listener chain
+        console.log("Add code promise rejected, form will not be cleared.", err.message);
+      });
+  } else {
+    showNotification("Ingresa un código y selecciona un origen", "error");
+  }
 });
 document.getElementById('operator-code-list').addEventListener('click', e => {
   const deleteBtn = e.target.closest('.delete-btn');
